@@ -55,7 +55,7 @@ import "./SearchMenu.scss";
 import type { AppClassProperties, SearchMatch } from "../types";
 
 const searchQueryAtom = atom<string>("");
-export const searchItemInFocusAtom = atom<number | null>(null);
+export const searchItemInFocusAtom = atom<string | null>(null);
 
 const SEARCH_DEBOUNCE = 350;
 
@@ -109,7 +109,7 @@ export const SearchMenu = () => {
       app.scene.getSceneNonce() !== lastSceneNonceRef.current
     ) {
       searchedQueryRef.current = null;
-      handleSearch(searchQuery, app, (matchItems, index) => {
+      handleSearch(searchQuery, app, (matchItems) => {
         setSearchMatches({
           nonce: randomInteger(),
           items: matchItems,
@@ -142,26 +142,36 @@ export const SearchMenu = () => {
 
   const goToNextItem = () => {
     if (searchMatches.items.length > 0) {
-      setFocusIndex((focusIndex) => {
-        if (focusIndex === null) {
-          return 0;
+      setFocusIndex((focusedElementId) => {
+        if (focusedElementId === null) {
+          return searchMatches.items[0].element.id;
         }
-
-        return (focusIndex + 1) % searchMatches.items.length;
+        const currentIndex = searchMatches.items.findIndex(
+          (item) => item.element.id === focusedElementId,
+        );
+        const nextIndex =
+          currentIndex === -1
+            ? 0
+            : (currentIndex + 1) % searchMatches.items.length;
+        return searchMatches.items[nextIndex].element.id;
       });
     }
   };
 
   const goToPreviousItem = () => {
     if (searchMatches.items.length > 0) {
-      setFocusIndex((focusIndex) => {
-        if (focusIndex === null) {
-          return 0;
+      setFocusIndex((focusedElementId) => {
+        if (focusedElementId === null) {
+          return searchMatches.items[searchMatches.items.length - 1].element.id;
         }
-
-        return focusIndex - 1 < 0
-          ? searchMatches.items.length - 1
-          : focusIndex - 1;
+        const currentIndex = searchMatches.items.findIndex(
+          (item) => item.element.id === focusedElementId,
+        );
+        const prevIndex =
+          currentIndex <= 0
+            ? searchMatches.items.length - 1
+            : currentIndex - 1;
+        return searchMatches.items[prevIndex].element.id;
       });
     }
   };
@@ -172,20 +182,13 @@ export const SearchMenu = () => {
         return null;
       }
 
-      const focusedId =
-        focusIndex !== null
-          ? state.searchMatches?.matches[focusIndex]?.id || null
-          : null;
-
       return {
         searchMatches: {
-          focusedId,
-          matches: state.searchMatches.matches.map((match, index) => {
-            if (index === focusIndex) {
-              return { ...match, focus: true };
-            }
-            return { ...match, focus: false };
-          }),
+          focusedId: focusIndex,
+          matches: state.searchMatches.matches.map((match) => ({
+            ...match,
+            focus: match.id === focusIndex,
+          })),
         },
       };
     });
@@ -193,7 +196,9 @@ export const SearchMenu = () => {
 
   useEffect(() => {
     if (searchMatches.items.length > 0 && focusIndex !== null) {
-      const match = searchMatches.items[focusIndex];
+      const match = searchMatches.items.find(
+        (item) => item.element.id === focusIndex,
+      );
 
       if (match) {
         const zoomValue = app.state.zoom.value;
@@ -354,12 +359,12 @@ export const SearchMenu = () => {
             setInputValue(value);
             setIsSearching(true);
             const searchQuery = value.trim() as SearchQuery;
-            handleSearch(searchQuery, app, (matchItems, index) => {
+            handleSearch(searchQuery, app, (matchItems, initialFocusId) => {
               setSearchMatches({
                 nonce: randomInteger(),
                 items: matchItems,
               });
-              setFocusIndex(index);
+              setFocusIndex(initialFocusId);
               searchedQueryRef.current = searchQuery;
               lastSceneNonceRef.current = app.scene.getSceneNonce();
               setAppState({
@@ -422,8 +427,8 @@ export const SearchMenu = () => {
 
       <MatchList
         matches={searchMatches}
-        onItemClick={setFocusIndex}
-        focusIndex={focusIndex}
+        onItemClick={(id) => setFocusIndex(id)}
+        focusedElementId={focusIndex}
         searchQuery={searchQuery}
       />
     </div>
@@ -473,8 +478,8 @@ const ListItem = (props: {
 
 interface MatchListProps {
   matches: SearchMatches;
-  onItemClick: (index: number) => void;
-  focusIndex: number | null;
+  onItemClick: (elementId: string) => void;
+  focusedElementId: string | null;
   searchQuery: SearchQuery;
 }
 
@@ -498,13 +503,13 @@ const MatchListBase = (props: MatchListProps) => {
             <div className="title-icon">{frameToolIcon}</div>
             <div>{t("search.frames")}</div>
           </div>
-          {frameNameMatches.map((searchMatch, index) => (
+          {frameNameMatches.map((searchMatch) => (
             <ListItem
               key={searchMatch.element.id + searchMatch.index}
               searchQuery={props.searchQuery}
               preview={searchMatch.preview}
-              highlighted={index === props.focusIndex}
-              onClick={() => props.onItemClick(index)}
+              highlighted={searchMatch.element.id === props.focusedElementId}
+              onClick={() => props.onItemClick(searchMatch.element.id)}
             />
           ))}
 
@@ -518,13 +523,13 @@ const MatchListBase = (props: MatchListProps) => {
             <div className="title-icon">{TextIcon}</div>
             <div>{t("search.texts")}</div>
           </div>
-          {textMatches.map((searchMatch, index) => (
+          {textMatches.map((searchMatch) => (
             <ListItem
               key={searchMatch.element.id + searchMatch.index}
               searchQuery={props.searchQuery}
               preview={searchMatch.preview}
-              highlighted={index + frameNameMatches.length === props.focusIndex}
-              onClick={() => props.onItemClick(index + frameNameMatches.length)}
+              highlighted={searchMatch.element.id === props.focusedElementId}
+              onClick={() => props.onItemClick(searchMatch.element.id)}
             />
           ))}
         </div>
@@ -536,7 +541,7 @@ const MatchListBase = (props: MatchListProps) => {
 const areEqual = (prevProps: MatchListProps, nextProps: MatchListProps) => {
   return (
     prevProps.matches.nonce === nextProps.matches.nonce &&
-    prevProps.focusIndex === nextProps.focusIndex
+    prevProps.focusedElementId === nextProps.focusedElementId
   );
 };
 
@@ -782,7 +787,7 @@ const handleSearch = debounce(
   (
     searchQuery: SearchQuery,
     app: AppClassProperties,
-    cb: (matchItems: SearchMatchItem[], focusIndex: number | null) => void,
+    cb: (matchItems: SearchMatchItem[], initialFocusId: string | null) => void,
   ) => {
     if (!searchQuery || searchQuery === "") {
       cb([], null);
@@ -798,8 +803,8 @@ const handleSearch = debounce(
       isFrameLikeElement(el),
     ) as ExcalidrawFrameLikeElement[];
 
-    texts.sort((a, b) => a.y - b.y);
-    frames.sort((a, b) => a.y - b.y);
+    texts.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    frames.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
     const textMatches: SearchMatchItem[] = [];
 
@@ -859,12 +864,11 @@ const handleSearch = debounce(
     // putting frame matches first
     const matchItems: SearchMatchItem[] = [...frameMatches, ...textMatches];
 
-    const focusIndex =
-      matchItems.findIndex((matchItem) =>
-        visibleIds.has(matchItem.element.id),
-      ) ?? null;
+    const firstVisibleMatch =
+      matchItems.find((matchItem) => visibleIds.has(matchItem.element.id)) ?? null;
+    const initialFocusId = firstVisibleMatch?.element.id ?? null;
 
-    cb(matchItems, focusIndex);
+    cb(matchItems, initialFocusId);
   },
   SEARCH_DEBOUNCE,
 );
