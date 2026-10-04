@@ -194,4 +194,37 @@ describe("search", () => {
       expect(h.app.state.searchMatches?.matches.length).toBe(3);
     });
   });
+
+  it("should maintain stable search result order when elements are repositioned", async () => {
+    const scrollIntoViewMock = jest.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
+
+    const el1 = API.createElement({ type: "text", text: "test one" });
+    const el2 = API.createElement({ type: "text", text: "test two" });
+    API.setElements([el1, el2]);
+
+    Keyboard.withModifierKeys({ ctrl: true }, () => {
+      Keyboard.keyPress(KEYS.F);
+    });
+    const searchInput = await querySearchInput();
+    updateTextEditor(searchInput, "test");
+
+    await waitFor(() => {
+      expect(h.app.state.searchMatches?.matches.length).toBe(2);
+    });
+
+    // Record the original order
+    const originalFirstId = h.app.state.searchMatches?.matches[0].id;
+    expect(originalFirstId).toBeTruthy();
+
+    // Simulate dragging el1 by updating its y position
+    // This should NOT change the search result order since we sort by id
+    API.updateElement(el1, { y: el1.y + 500 });
+
+    await waitFor(() => {
+      expect(h.app.state.searchMatches?.matches.length).toBe(2);
+      // Order should be stable (same element still first)
+      expect(h.app.state.searchMatches?.matches[0].id).toBe(originalFirstId);
+    });
+  });
 });
